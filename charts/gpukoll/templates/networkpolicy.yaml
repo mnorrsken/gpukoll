@@ -1,0 +1,27 @@
+{{- if .Values.networkPolicy.enabled -}}
+# Lets gpukoll scrape the DCGM exporter pods in the GPU Operator namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gpukoll.fullname" . }}-to-dcgm-exporter
+  namespace: {{ .Values.dcgm.namespace }}
+  labels:
+    {{- include "gpukoll.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml .Values.networkPolicy.exporterPodLabels | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "gpukoll.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.exporterPort }}
+{{- end }}

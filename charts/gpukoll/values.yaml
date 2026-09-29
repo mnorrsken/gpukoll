@@ -88,3 +88,13 @@ dcgm:
   # nvidia-gpu-operator on OpenShift, gpu-operator for the upstream chart.
   namespace: nvidia-gpu-operator
   service: nvidia-dcgm-exporter
+
+# A NetworkPolicy in dcgm.namespace that lets gpukoll reach the exporter.
+# Only enable it when that namespace already has NetworkPolicies selecting
+# the exporter pods. A policy isolates every pod it selects, so in an open
+# namespace this would block other scrapers such as Prometheus.
+networkPolicy:
+  enabled: false
+  exporterPodLabels:
+    app: nvidia-dcgm-exporter
+  exporterPort: 9400

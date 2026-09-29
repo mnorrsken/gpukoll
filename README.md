@@ -49,8 +49,16 @@ read pods. No Secret is needed.
 
 Set `dcgm.namespace` to where the GPU Operator runs. The default is
 `nvidia-gpu-operator` (OpenShift); the upstream Helm chart uses
-`gpu-operator`. If that namespace has a NetworkPolicy, allow ingress from
-gpukoll on port 9400.
+`gpu-operator`.
+
+If that namespace has NetworkPolicies selecting the exporter pods, set
+`networkPolicy.enabled=true` and the chart adds one there that allows
+gpukoll in on port 9400. Leave it off when the namespace has no policies:
+a policy isolates the pods it selects, so it would block other scrapers
+such as Prometheus. The user running `helm install` needs rights to create
+NetworkPolicies in that namespace. `networkPolicy.exporterPodLabels`
+(default `app: nvidia-dcgm-exporter`) and `networkPolicy.exporterPort`
+(default `9400`) must match the exporter pods.
 
 On **OpenShift** a Route with edge TLS is created automatically (the chart
 checks for `route.openshift.io/v1`). The pod sets no `runAsUser`, so it
