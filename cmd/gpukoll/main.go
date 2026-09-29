@@ -69,6 +69,8 @@ func run(listen, api string, cfg server.Config) error {
 		Addr:              listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 	go func() {
 		<-ctx.Done()

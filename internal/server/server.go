@@ -54,7 +54,21 @@ type Server struct {
 	mu   sync.RWMutex
 	snap *gpu.Snapshot
 	err  error
+
+	// The last errors logged for the exporter endpoints and per node, so
+	// a failure is logged when it starts and ends, not on every poll. Only
+	// the poll goroutine uses them.
+	loggedEndpoints string
+	logged          map[string]string
 }
+
+// Error texts shown to visitors. The full errors, which name pod IPs,
+// namespaces and service accounts, only go to the log.
+const (
+	errNodes     = "cannot list nodes (see the gpukoll log)"
+	errEndpoints = "cannot list the DCGM exporter endpoints (see the gpukoll log)"
+	errScrape    = "cannot read the DCGM exporter (see the gpukoll log)"
+)
 
 // New returns a server that polls src every cfg.Interval.
 func New(src Source, cfg Config) *Server {
@@ -116,15 +130,24 @@ type exporter struct {
 
 // usage scrapes the DCGM exporter of every node in parallel. Failures are
 // reported per node, so one broken exporter only greys out its own server.
+// The returned errors are the generic texts shown to visitors; the full
+// errors are logged.
 func (s *Server) usage(ctx context.Context, nodes []kube.Node) map[string]gpu.Usage {
 	out := map[string]gpu.Usage{}
 	slices, err := s.src.EndpointSlices(ctx, s.cfg.DCGMNamespace, s.cfg.DCGMService)
 	if err != nil {
-		err = fmt.Errorf("listing DCGM exporter endpoints in %s: %w", s.cfg.DCGMNamespace, err)
+		if msg := err.Error(); msg != s.loggedEndpoints {
+			slog.Error("listing DCGM exporter endpoints", "namespace", s.cfg.DCGMNamespace, "err", msg)
+			s.loggedEndpoints = msg
+		}
 		for _, n := range nodes {
-			out[n.Metadata.Name] = gpu.Usage{Err: err}
+			out[n.Metadata.Name] = gpu.Usage{Err: errors.New(errEndpoints)}
 		}
 		return out
+	}
+	if s.loggedEndpoints != "" {
+		slog.Info("listing DCGM exporter endpoints recovered")
+		s.loggedEndpoints = ""
 	}
 
 	exporters := map[string]exporter{}
@@ -152,19 +175,46 @@ func (s *Server) usage(ctx context.Context, nodes []kube.Node) map[string]gpu.Us
 	}
 
 	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
+		mu   sync.Mutex
+		wg   sync.WaitGroup
+		errs = map[string]error{}
 	)
 	for nodeName, e := range exporters {
 		wg.Go(func() {
 			devs, err := s.scrapeOne(ctx, e)
 			mu.Lock()
-			out[nodeName] = gpu.Usage{Devices: devs, Err: err}
-			mu.Unlock()
+			defer mu.Unlock()
+			if err != nil {
+				errs[nodeName] = err
+				out[nodeName] = gpu.Usage{Err: errors.New(errScrape)}
+				return
+			}
+			out[nodeName] = gpu.Usage{Devices: devs}
 		})
 	}
 	wg.Wait()
+	s.logErrors(errs, out)
 	return out
+}
+
+// logErrors logs the per-node errors of this poll that differ from the
+// previous poll, and logs recovery for nodes that had an error before and
+// were read fine now.
+func (s *Server) logErrors(errs map[string]error, usage map[string]gpu.Usage) {
+	next := map[string]string{}
+	for node, err := range errs {
+		msg := err.Error()
+		next[node] = msg
+		if s.logged[node] != msg {
+			slog.Error("reading DCGM exporter", "node", node, "err", msg)
+		}
+	}
+	for node := range s.logged {
+		if u, ok := usage[node]; ok && u.Err == nil {
+			slog.Info("reading DCGM exporter recovered", "node", node)
+		}
+	}
+	s.logged = next
 }
 
 func (s *Server) scrapeOne(ctx context.Context, e exporter) ([]dcgm.Device, error) {
@@ -217,7 +267,7 @@ func (s *Server) handleGPUs(w http.ResponseWriter, _ *http.Request) {
 		Version:        version.Version,
 	}
 	if s.err != nil {
-		resp.Error = s.err.Error()
+		resp.Error = errNodes
 	}
 	s.mu.RUnlock()
 
