@@ -4,6 +4,8 @@ A small web page that shows the GPU servers in a Kubernetes or OpenShift
 cluster running the NVIDIA GPU Operator: how many GPUs there are, how many
 are in use, and which servers are online.
 
+![gpukoll with demo data](docs/screenshot.png)
+
 - Each server is a frame. Each GPU is a block: green is available, orange
   (striped) is in use, grey means the server is offline, dashed means the
   server is up but its DCGM exporter could not be read. Block area follows
