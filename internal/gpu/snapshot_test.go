@@ -89,6 +89,15 @@ func TestBuild(t *testing.T) {
 			wantSummary: Summary{},
 		},
 		{
+			// The GPU Operator labels every GPU node with strategy "single",
+			// MIG or not.
+			name:        "single strategy label on a non mig node",
+			nodes:       []kube.Node{node(t, "gpu1", "True", map[string]string{labelCount: "2", labelMIG: "single"}, map[string]string{resGPU: "2"})},
+			usage:       map[string]Usage{"gpu1": gpus(t, 2, 0, 1)},
+			wantUsed:    map[string][]bool{"gpu1": {true, true}},
+			wantSummary: Summary{Total: 2, Used: 2, Servers: 1, ServersOnline: 1},
+		},
+		{
 			name:        "time slicing shows physical gpus",
 			nodes:       []kube.Node{node(t, "gpu1", "True", map[string]string{labelCount: "2", labelReplicas: "4"}, map[string]string{resGPU: "8"})},
 			usage:       map[string]Usage{"gpu1": gpus(t, 2, 1)},

@@ -80,24 +80,40 @@ type group struct {
 	product   string
 	count     int
 	memoryMiB int
-	// Which DCGM devices belong to the group: whole GPUs, all MIG
-	// instances (MIG strategy "single"), or the MIG instances of one
-	// profile (strategy "mixed").
-	migAll     bool
+	// migProfile is set for the MIG instances of one profile (strategy
+	// "mixed"). Otherwise the group is nvidia.com/gpu.
 	migProfile string
+	// mixed is set on nvidia.com/gpu when the node uses the "mixed" MIG
+	// strategy; MIG instances then have groups of their own.
+	mixed bool
 }
 
-func (g group) mig() bool { return g.migAll || g.migProfile != "" }
+func (g group) mig() bool {
+	return g.migProfile != "" || strings.Contains(g.product, "-MIG-")
+}
 
-func (g group) matches(d dcgm.Device) bool {
-	switch {
-	case g.migAll:
-		return d.MIG()
-	case g.migProfile != "":
-		return d.MIG() && d.Profile == g.migProfile
-	default:
-		return !d.MIG()
+// devices returns the DCGM devices that belong to the group.
+func (g group) devices(all []dcgm.Device) []dcgm.Device {
+	var whole, mig []dcgm.Device
+	for _, d := range all {
+		switch {
+		case !d.MIG():
+			whole = append(whole, d)
+		case g.migProfile == "" || d.Profile == g.migProfile:
+			mig = append(mig, d)
+		}
 	}
+	if g.migProfile != "" {
+		return mig
+	}
+	// nvidia.com/gpu is whole GPUs, or MIG instances when the node runs MIG
+	// with the "single" strategy. The nvidia.com/mig.strategy label can't
+	// tell these apart: the GPU Operator sets it to "single" on every GPU
+	// node, MIG or not. So go by what the exporter reports.
+	if len(whole) > 0 || g.mixed {
+		return whole
+	}
+	return mig
 }
 
 // Usage is what a node's DCGM exporter reported.
@@ -147,12 +163,7 @@ func Build(nodes []kube.Node, usage map[string]Usage, now time.Time) Snapshot {
 			s.UsageKnown = true
 		}
 		for _, g := range groups {
-			var devs []dcgm.Device
-			for _, d := range u.Devices {
-				if g.matches(d) {
-					devs = append(devs, d)
-				}
-			}
+			devs := g.devices(u.Devices)
 			for i := range g.count {
 				used := s.UsageKnown && i < len(devs) && devs[i].Used
 				if used {
@@ -216,7 +227,7 @@ func nodeGroups(n kube.Node) []group {
 			product:   l[labelProduct],
 			count:     count,
 			memoryMiB: atoi(l[labelMemory]),
-			migAll:    l[labelMIG] == "single",
+			mixed:     l[labelMIG] == "mixed",
 		})
 	}
 
