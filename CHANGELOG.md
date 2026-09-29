@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.3.0
+
+### Added
+- **Optional NetworkPolicy** — `networkPolicy.enabled=true` adds a NetworkPolicy in `dcgm.namespace` that lets gpukoll reach the DCGM exporter pods on TCP 9400. Off by default: only enable it when that namespace already has policies selecting the exporter pods, since a new policy would otherwise block other scrapers such as Prometheus. `networkPolicy.exporterPodLabels` and `networkPolicy.exporterPort` set the exporter pod labels and port.
+- **Screenshot** — README shows gpukoll with demo data.
+- **Dependabot** — weekly updates for Go modules, GitHub Actions and the Docker base images.
+
 ## v0.2.1
 
 ### Fixed
