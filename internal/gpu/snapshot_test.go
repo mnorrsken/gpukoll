@@ -1,9 +1,11 @@
 package gpu
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/mnorrsken/gpukoll/internal/dcgm"
 	"github.com/mnorrsken/gpukoll/internal/kube"
 )
 
@@ -17,17 +19,17 @@ func node(t *testing.T, name string, ready string, labels, capacity map[string]s
 	return n
 }
 
-func pod(t *testing.T, nodeName, phase string, requests ...map[string]string) kube.Pod {
+// gpus returns whole-GPU devices; used lists the indexes allocated to pods.
+func gpus(t *testing.T, n int, used ...int) Usage {
 	t.Helper()
-	var p kube.Pod
-	p.Spec.NodeName = nodeName
-	p.Status.Phase = phase
-	for _, r := range requests {
-		var c kube.Container
-		c.Resources.Limits = r
-		p.Spec.Containers = append(p.Spec.Containers, c)
+	var u Usage
+	for i := range n {
+		u.Devices = append(u.Devices, dcgm.Device{GPU: i, Instance: -1})
 	}
-	return p
+	for _, i := range used {
+		u.Devices[i].Used = true
+	}
+	return u
 }
 
 func TestBuild(t *testing.T) {
@@ -40,119 +42,131 @@ func TestBuild(t *testing.T) {
 	tests := []struct {
 		name        string
 		nodes       []kube.Node
-		pods        []kube.Pod
-		wantServer  []int // total, used per server
+		usage       map[string]Usage
+		wantUsed    map[string][]bool // per server, per block
 		wantSummary Summary
 	}{
 		{
-			name: "online node with pods",
-			nodes: []kube.Node{
-				node(t, "gpu1", "True", a100, map[string]string{resGPU: "8"}),
-			},
-			pods: []kube.Pod{
-				pod(t, "gpu1", "Running", map[string]string{resGPU: "2"}, map[string]string{"cpu": "1"}),
-				pod(t, "gpu1", "Pending", map[string]string{resGPU: "1"}),
-				pod(t, "gpu1", "Succeeded", map[string]string{resGPU: "4"}),
-				pod(t, "", "Pending", map[string]string{resGPU: "4"}),
-			},
-			wantServer:  []int{8, 3},
-			wantSummary: Summary{Total: 8, Used: 3, Available: 5, Servers: 1, ServersOnline: 1},
+			name:        "used gpus follow dcgm indexes",
+			nodes:       []kube.Node{node(t, "gpu1", "True", a100, map[string]string{resGPU: "8"})},
+			usage:       map[string]Usage{"gpu1": gpus(t, 8, 1, 6)},
+			wantUsed:    map[string][]bool{"gpu1": {false, true, false, false, false, false, true, false}},
+			wantSummary: Summary{Total: 8, Used: 2, Available: 6, Servers: 1, ServersOnline: 1},
 		},
 		{
-			name: "offline node counts as offline",
+			name: "offline node is grey even with stale usage",
 			nodes: []kube.Node{
 				node(t, "gpu1", "True", a100, map[string]string{resGPU: "8"}),
 				node(t, "gpu2", "Unknown", a100, map[string]string{resGPU: "8"}),
 			},
-			pods: []kube.Pod{
-				pod(t, "gpu2", "Running", map[string]string{resGPU: "8"}),
+			usage: map[string]Usage{"gpu1": gpus(t, 8), "gpu2": gpus(t, 8, 0, 1)},
+			wantUsed: map[string][]bool{
+				"gpu1": make([]bool, 8),
+				"gpu2": make([]bool, 8),
 			},
-			wantServer:  []int{8, 0, 8, 0},
-			wantSummary: Summary{Total: 16, Used: 0, Available: 8, Offline: 8, Servers: 2, ServersOnline: 1},
+			wantSummary: Summary{Total: 16, Available: 8, Offline: 8, Servers: 2, ServersOnline: 1},
 		},
 		{
-			name: "label count used when device plugin is down",
+			name: "missing or failing exporter means unknown usage",
 			nodes: []kube.Node{
-				node(t, "gpu1", "True", a100, nil),
+				node(t, "gpu1", "True", a100, map[string]string{resGPU: "8"}),
+				node(t, "gpu2", "True", a100, map[string]string{resGPU: "8"}),
 			},
-			wantServer:  []int{8, 0},
-			wantSummary: Summary{Total: 8, Available: 8, Servers: 1, ServersOnline: 1},
+			usage:       map[string]Usage{"gpu2": {Err: errors.New("connection refused")}},
+			wantUsed:    map[string][]bool{"gpu1": make([]bool, 8), "gpu2": make([]bool, 8)},
+			wantSummary: Summary{Total: 16, Unknown: 16, Servers: 2, ServersOnline: 2},
 		},
 		{
-			name: "non gpu node is skipped",
-			nodes: []kube.Node{
-				node(t, "cpu1", "True", map[string]string{"kubernetes.io/os": "linux"}, map[string]string{"cpu": "32"}),
-			},
+			name:        "label count used when device plugin is down",
+			nodes:       []kube.Node{node(t, "gpu1", "True", a100, nil)},
+			usage:       map[string]Usage{"gpu1": gpus(t, 8, 0)},
+			wantUsed:    map[string][]bool{"gpu1": {true, false, false, false, false, false, false, false}},
+			wantSummary: Summary{Total: 8, Used: 1, Available: 7, Servers: 1, ServersOnline: 1},
+		},
+		{
+			name:        "non gpu node is skipped",
+			nodes:       []kube.Node{node(t, "cpu1", "True", map[string]string{"kubernetes.io/os": "linux"}, map[string]string{"cpu": "32"})},
 			wantSummary: Summary{},
 		},
 		{
-			name: "time slicing rounds up to physical gpus",
-			nodes: []kube.Node{
-				node(t, "gpu1", "True", map[string]string{labelCount: "2", labelReplicas: "4"}, map[string]string{resGPU: "8"}),
-			},
-			pods: []kube.Pod{
-				pod(t, "gpu1", "Running", map[string]string{resGPU: "1"}),
-				pod(t, "gpu1", "Running", map[string]string{resGPU: "4"}),
-			},
-			wantServer:  []int{2, 2},
-			wantSummary: Summary{Total: 2, Used: 2, Servers: 1, ServersOnline: 1},
+			name:        "time slicing shows physical gpus",
+			nodes:       []kube.Node{node(t, "gpu1", "True", map[string]string{labelCount: "2", labelReplicas: "4"}, map[string]string{resGPU: "8"})},
+			usage:       map[string]Usage{"gpu1": gpus(t, 2, 1)},
+			wantUsed:    map[string][]bool{"gpu1": {false, true}},
+			wantSummary: Summary{Total: 2, Used: 1, Available: 1, Servers: 1, ServersOnline: 1},
 		},
 		{
 			name: "mixed mig strategy",
-			nodes: []kube.Node{
-				node(t, "gpu1", "True", map[string]string{
-					labelPresent:                   "true",
-					labelMIG:                       "mixed",
-					labelProduct:                   "NVIDIA-A100-SXM4-40GB",
-					"nvidia.com/mig-1g.5gb.count":  "7",
-					"nvidia.com/mig-1g.5gb.memory": "4864",
-					"nvidia.com/mig-3g.20gb.count": "2",
-				}, map[string]string{resGPU: "1", "nvidia.com/mig-1g.5gb": "7", "nvidia.com/mig-3g.20gb": "2"}),
-			},
-			pods: []kube.Pod{
-				pod(t, "gpu1", "Running", map[string]string{"nvidia.com/mig-1g.5gb": "3"}),
-			},
-			wantServer:  []int{10, 3},
-			wantSummary: Summary{Total: 10, Used: 3, Available: 7, Servers: 1, ServersOnline: 1},
+			nodes: []kube.Node{node(t, "gpu1", "True", map[string]string{
+				labelPresent:                   "true",
+				labelMIG:                       "mixed",
+				labelProduct:                   "NVIDIA-A100-SXM4-40GB",
+				"nvidia.com/mig-1g.5gb.count":  "2",
+				"nvidia.com/mig-1g.5gb.memory": "4864",
+				"nvidia.com/mig-3g.20gb.count": "1",
+			}, map[string]string{resGPU: "1", "nvidia.com/mig-1g.5gb": "2", "nvidia.com/mig-3g.20gb": "1"})},
+			usage: map[string]Usage{"gpu1": {Devices: []dcgm.Device{
+				{GPU: 0, Instance: 1, Profile: "3g.20gb", Used: true},
+				{GPU: 0, Instance: 7, Profile: "1g.5gb"},
+				{GPU: 0, Instance: 8, Profile: "1g.5gb", Used: true},
+				{GPU: 1, Instance: -1},
+			}}},
+			// whole GPU first, then MIG profiles in name order
+			wantUsed:    map[string][]bool{"gpu1": {false, false, true, true}},
+			wantSummary: Summary{Total: 4, Used: 2, Available: 2, Servers: 1, ServersOnline: 1},
+		},
+		{
+			name: "single mig strategy",
+			nodes: []kube.Node{node(t, "gpu1", "True", map[string]string{
+				labelMIG:     "single",
+				labelCount:   "3",
+				labelProduct: "A100-SXM4-40GB-MIG-1g.5gb",
+			}, nil)},
+			usage: map[string]Usage{"gpu1": {Devices: []dcgm.Device{
+				{GPU: 0, Instance: 7, Profile: "1g.5gb"},
+				{GPU: 0, Instance: 8, Profile: "1g.5gb", Used: true},
+				{GPU: 0, Instance: 9, Profile: "1g.5gb"},
+			}}},
+			wantUsed:    map[string][]bool{"gpu1": {false, true, false}},
+			wantSummary: Summary{Total: 3, Used: 1, Available: 2, Servers: 1, ServersOnline: 1},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			snap := Build(tt.nodes, tt.pods, time.Unix(0, 0))
+			snap := Build(tt.nodes, tt.usage, time.Unix(0, 0))
 			if snap.Summary != tt.wantSummary {
 				t.Errorf("summary = %+v, want %+v", snap.Summary, tt.wantSummary)
 			}
-			var got []int
+			if len(snap.Servers) != len(tt.wantUsed) {
+				t.Fatalf("got %d servers, want %d", len(snap.Servers), len(tt.wantUsed))
+			}
 			for _, s := range snap.Servers {
-				got = append(got, s.Total, s.Used)
+				want := tt.wantUsed[s.Name]
+				if len(s.GPUs) != len(want) || len(s.GPUs) != s.Total {
+					t.Fatalf("%s: %d blocks, total %d, want %d", s.Name, len(s.GPUs), s.Total, len(want))
+				}
 				used := 0
-				for _, g := range s.GPUs {
+				for i, g := range s.GPUs {
+					if g.Used != want[i] {
+						t.Errorf("%s: block %d used = %v, want %v", s.Name, i, g.Used, want[i])
+					}
 					if g.Used {
 						used++
 					}
 				}
-				if used != s.Used || len(s.GPUs) != s.Total {
-					t.Errorf("%s: %d blocks with %d used, want %d with %d", s.Name, len(s.GPUs), used, s.Total, s.Used)
-				}
-			}
-			if len(got) != len(tt.wantServer) {
-				t.Fatalf("servers = %v, want %v", got, tt.wantServer)
-			}
-			for i := range got {
-				if got[i] != tt.wantServer[i] {
-					t.Fatalf("servers = %v, want %v", got, tt.wantServer)
+				if used != s.Used {
+					t.Errorf("%s: Used = %d, blocks say %d", s.Name, s.Used, used)
 				}
 			}
 		})
 	}
 }
 
-func TestPodRequestsInitContainer(t *testing.T) {
-	p := pod(t, "n", "Running", map[string]string{resGPU: "1"})
-	var ic kube.Container
-	ic.Resources.Requests = map[string]string{resGPU: "2"}
-	p.Spec.InitContainers = []kube.Container{ic}
-	if got := podRequests(p)[resGPU]; got != 2 {
-		t.Errorf("podRequests = %d, want 2", got)
+func TestBuildUsageError(t *testing.T) {
+	nodes := []kube.Node{node(t, "gpu1", "True", map[string]string{labelCount: "1"}, nil)}
+	snap := Build(nodes, map[string]Usage{"gpu1": {Err: errors.New("boom")}}, time.Unix(0, 0))
+	s := snap.Servers[0]
+	if s.UsageKnown || s.UsageError != "boom" {
+		t.Errorf("UsageKnown = %v, UsageError = %q", s.UsageKnown, s.UsageError)
 	}
 }

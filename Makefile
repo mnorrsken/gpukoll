@@ -12,7 +12,7 @@ build:
 
 # Needs `kubectl proxy` running on port 8001.
 run: build
-	./bin/gpukoll -api http://127.0.0.1:8001
+	./bin/gpukoll -api http://127.0.0.1:8001 -dcgm-proxy
 
 test:
 	go test ./...

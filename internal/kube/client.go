@@ -1,5 +1,5 @@
 // Package kube is a minimal read-only client for the Kubernetes API.
-// It only lists nodes and pods, so it avoids pulling in client-go.
+// It only lists nodes and endpoint slices, so it avoids pulling in client-go.
 package kube
 
 import (
@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -73,43 +74,53 @@ func (c *Client) Nodes(ctx context.Context) ([]Node, error) {
 	return l.Items, nil
 }
 
-// ActivePods lists pods in all namespaces that have not finished.
-func (c *Client) ActivePods(ctx context.Context) ([]Pod, error) {
+// EndpointSlices lists the EndpointSlices of a Service.
+func (c *Client) EndpointSlices(ctx context.Context, namespace, service string) ([]EndpointSlice, error) {
 	var l struct {
-		Items []Pod `json:"items"`
+		Items []EndpointSlice `json:"items"`
 	}
-	path := "/api/v1/pods?resourceVersion=0&fieldSelector=" +
-		"status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed%2Cspec.nodeName%21%3D"
+	q := url.Values{"labelSelector": {"kubernetes.io/service-name=" + service}}
+	path := "/apis/discovery.k8s.io/v1/namespaces/" + url.PathEscape(namespace) + "/endpointslices?" + q.Encode()
 	if err := c.get(ctx, path, &l); err != nil {
 		return nil, err
 	}
 	return l.Items, nil
 }
 
-func (c *Client) get(ctx context.Context, path string, out any) error {
+// Raw returns the body of a GET request to path, such as a pod proxy URL.
+// The caller closes it.
+func (c *Client) Raw(ctx context.Context, path string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
 	if c.tokenFile != "" {
 		// Re-read on every call: projected tokens are rotated by the kubelet.
 		tok, err := os.ReadFile(c.tokenFile)
 		if err != nil {
-			return fmt.Errorf("reading service account token: %w", err)
+			return nil, fmt.Errorf("reading service account token: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("get %s: %w", path, err)
+		return nil, fmt.Errorf("get %s: %w", path, err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("get %s: %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("get %s: %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	return resp.Body, nil
+}
+
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	body, err := c.Raw(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	if err := json.NewDecoder(body).Decode(out); err != nil {
 		return fmt.Errorf("decoding %s: %w", path, err)
 	}
 	return nil

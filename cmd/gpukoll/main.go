@@ -23,6 +23,9 @@ func main() {
 	listen := flag.String("listen", ":8080", "HTTP listen address")
 	api := flag.String("api", "", "Kubernetes API URL without auth, e.g. http://127.0.0.1:8001 from `kubectl proxy`; empty uses the in-cluster service account")
 	interval := flag.Duration("interval", 10*time.Second, "how often to poll the cluster")
+	dcgmNamespace := flag.String("dcgm-namespace", "nvidia-gpu-operator", "namespace of the NVIDIA DCGM exporter (gpu-operator outside OpenShift)")
+	dcgmService := flag.String("dcgm-service", "nvidia-dcgm-exporter", "Service name of the NVIDIA DCGM exporter")
+	dcgmProxy := flag.Bool("dcgm-proxy", false, "scrape DCGM exporters through the API server pod proxy (for running outside the cluster; needs pods/proxy)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -30,14 +33,20 @@ func main() {
 		fmt.Printf("gpukoll %s (%s)\n", version.Version, version.Commit)
 		return
 	}
-	if err := run(*listen, *api, *interval); err != nil {
+	cfg := server.Config{
+		Interval:      *interval,
+		DCGMNamespace: *dcgmNamespace,
+		DCGMService:   *dcgmService,
+		DCGMProxy:     *dcgmProxy,
+	}
+	if err := run(*listen, *api, cfg); err != nil {
 		slog.Error("gpukoll failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(listen, api string, interval time.Duration) error {
-	if interval <= 0 {
+func run(listen, api string, cfg server.Config) error {
+	if cfg.Interval <= 0 {
 		return errors.New("-interval must be positive")
 	}
 	var client *kube.Client
@@ -53,7 +62,7 @@ func run(listen, api string, interval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := server.New(client, interval)
+	srv := server.New(client, cfg)
 	go srv.Run(ctx)
 
 	hs := &http.Server{
@@ -68,7 +77,8 @@ func run(listen, api string, interval time.Duration) error {
 		hs.Shutdown(shutdown)
 	}()
 
-	slog.Info("gpukoll starting", "version", version.Version, "listen", listen, "interval", interval)
+	slog.Info("gpukoll starting", "version", version.Version, "listen", listen, "interval", cfg.Interval,
+		"dcgmNamespace", cfg.DCGMNamespace, "dcgmService", cfg.DCGMService, "dcgmProxy", cfg.DCGMProxy)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serving http: %w", err)
 	}

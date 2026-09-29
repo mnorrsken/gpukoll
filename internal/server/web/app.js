@@ -76,13 +76,18 @@ function renderSummary(sum) {
 
   const online = sum.used + sum.available;
   $("s-used-sub").textContent = online ? Math.round((100 * sum.used) / online) + "% of online GPUs" : " ";
-  $("s-total-sub").textContent = sum.offline ? sum.offline + " on offline servers" : "all on online servers";
+  const notes = [];
+  if (sum.offline) notes.push(sum.offline + " on offline servers");
+  if (sum.unknown) notes.push(sum.unknown + " with unknown usage");
+  $("s-total-sub").textContent = notes.length ? notes.join(", ") : "all on online servers";
+  $("legend-unknown").hidden = !sum.unknown;
   const down = sum.servers - sum.serversOnline;
   $("s-servers-sub").textContent = down ? down + (down === 1 ? " server down" : " servers down") : "all servers up";
 
   const parts = [
     ["used", sum.used],
     ["free", sum.available],
+    ["unknown", sum.unknown],
     ["off", sum.offline],
   ].filter(([, n]) => n > 0);
   $("usage").innerHTML = parts.map(([cls, n]) => `<div class="${cls}" style="flex-grow:${n}"></div>`).join("");
@@ -95,8 +100,8 @@ function blockSize(mib, maxMiB) {
 
 function renderBlock(g, i, server, maxMiB) {
   const size = blockSize(g.memoryMiB, maxMiB);
-  const state = !server.online ? "off" : g.used ? "used" : "free";
-  const stateText = { off: "server offline", used: "in use", free: "available" }[state];
+  const state = !server.online ? "off" : !server.usageKnown ? "unknown" : g.used ? "used" : "free";
+  const stateText = { off: "server offline", unknown: "usage unknown", used: "in use", free: "available" }[state];
   const mem = g.memoryMiB ? gb(g.memoryMiB) + " GB" : "memory unknown";
   let label = "";
   if (g.memoryMiB && size >= 40) label = `<span>${gb(g.memoryMiB)}<small>GB</small></span>`;
@@ -127,9 +132,11 @@ function renderServer(s, maxMiB) {
   const pill = s.online
     ? `<span class="pill on"><i></i>Online</span>`
     : `<span class="pill down" title="${esc(s.status + since)}"><i></i>Offline</span>`;
-  const count = s.online
-    ? `<b>${s.used}</b> of ${s.total} in use · <b>${s.total - s.used}</b> available`
-    : `${s.total} GPUs unavailable · ${esc(s.status)}${esc(since)}`;
+  let count;
+  if (!s.online) count = `${s.total} GPUs unavailable · ${esc(s.status)}${esc(since)}`;
+  else if (!s.usageKnown)
+    count = `${s.total} GPUs · usage unknown<div class="server-error" title="${esc(s.usageError)}">${esc(s.usageError)}</div>`;
+  else count = `<b>${s.used}</b> of ${s.total} in use · <b>${s.total - s.used}</b> available`;
   const blocks = s.gpus.map((g, i) => renderBlock(g, i, s, maxMiB)).join("");
   return `<article class="server${s.online ? "" : " offline"}">
     <div class="server-head">

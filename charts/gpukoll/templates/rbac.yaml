@@ -7,8 +7,8 @@ metadata:
     {{- include "gpukoll.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "pods"]
-    verbs: ["get", "list"]
+    resources: ["nodes"]
+    verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -19,6 +19,35 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
+  name: {{ include "gpukoll.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpukoll.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Finds the DCGM exporter pods, so gpukoll can scrape each node's exporter.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "gpukoll.fullname" . }}
+  namespace: {{ .Values.dcgm.namespace }}
+  labels:
+    {{- include "gpukoll.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "gpukoll.fullname" . }}
+  namespace: {{ .Values.dcgm.namespace }}
+  labels:
+    {{- include "gpukoll.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
   name: {{ include "gpukoll.fullname" . }}
 subjects:
   - kind: ServiceAccount

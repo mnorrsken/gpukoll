@@ -1,9 +1,9 @@
 // Package gpu turns Kubernetes nodes and pods into a GPU inventory.
 //
 // GPU details come from the labels that NVIDIA GPU Feature Discovery (part of
-// the GPU Operator) puts on each node. Usage comes from the GPU resource
-// requests of pods scheduled on the node. A node is online when its Ready
-// condition is True.
+// the GPU Operator) puts on each node. Usage comes from the node's DCGM
+// exporter: a GPU is in use when it is allocated to a pod. A node is online
+// when its Ready condition is True.
 package gpu
 
 import (
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mnorrsken/gpukoll/internal/dcgm"
 	"github.com/mnorrsken/gpukoll/internal/kube"
 )
 
@@ -36,13 +37,15 @@ type Snapshot struct {
 	Servers   []Server  `json:"servers"`
 }
 
-// Summary counts GPUs over all servers. GPUs on offline servers are
-// counted in Total and Offline only.
+// Summary counts GPUs over all servers. GPUs on offline servers, and on
+// servers whose usage is unknown, are counted in Total and Offline or
+// Unknown only.
 type Summary struct {
 	Total         int `json:"total"`
 	Used          int `json:"used"`
 	Available     int `json:"available"`
 	Offline       int `json:"offline"`
+	Unknown       int `json:"unknown"`
 	Servers       int `json:"servers"`
 	ServersOnline int `json:"serversOnline"`
 }
@@ -57,7 +60,11 @@ type Server struct {
 	Driver  string    `json:"driver,omitempty"`
 	Total   int       `json:"total"`
 	Used    int       `json:"used"`
-	GPUs    []GPU     `json:"gpus"`
+	// UsageKnown is false when the node's DCGM exporter could not be read;
+	// UsageError then says why.
+	UsageKnown bool   `json:"usageKnown"`
+	UsageError string `json:"usageError,omitempty"`
+	GPUs       []GPU  `json:"gpus"`
 }
 
 // GPU is one schedulable GPU or MIG device.
@@ -70,29 +77,38 @@ type GPU struct {
 
 // group is a set of identical devices exposed as one extended resource.
 type group struct {
-	resource  string
 	product   string
 	count     int
 	memoryMiB int
-	replicas  int
-	mig       bool
+	// Which DCGM devices belong to the group: whole GPUs, all MIG
+	// instances (MIG strategy "single"), or the MIG instances of one
+	// profile (strategy "mixed").
+	migAll     bool
+	migProfile string
 }
 
-// Build computes a snapshot from nodes and the pods running on them.
-func Build(nodes []kube.Node, pods []kube.Pod, now time.Time) Snapshot {
-	requested := map[string]map[string]int{} // node -> resource -> count
-	for _, p := range pods {
-		if p.Spec.NodeName == "" || p.Status.Phase == "Succeeded" || p.Status.Phase == "Failed" {
-			continue
-		}
-		for res, n := range podRequests(p) {
-			if requested[p.Spec.NodeName] == nil {
-				requested[p.Spec.NodeName] = map[string]int{}
-			}
-			requested[p.Spec.NodeName][res] += n
-		}
-	}
+func (g group) mig() bool { return g.migAll || g.migProfile != "" }
 
+func (g group) matches(d dcgm.Device) bool {
+	switch {
+	case g.migAll:
+		return d.MIG()
+	case g.migProfile != "":
+		return d.MIG() && d.Profile == g.migProfile
+	default:
+		return !d.MIG()
+	}
+}
+
+// Usage is what a node's DCGM exporter reported.
+type Usage struct {
+	Devices []dcgm.Device
+	Err     error
+}
+
+// Build computes a snapshot from nodes and the DCGM usage of each node,
+// keyed by node name. A node missing from usage has unknown usage.
+func Build(nodes []kube.Node, usage map[string]Usage, now time.Time) Snapshot {
 	snap := Snapshot{UpdatedAt: now, Servers: []Server{}}
 	for _, n := range nodes {
 		groups := nodeGroups(n)
@@ -120,18 +136,34 @@ func Build(nodes []kube.Node, pods []kube.Pod, now time.Time) Snapshot {
 				}
 			}
 		}
+		u, ok := usage[s.Name]
+		switch {
+		case !s.Online:
+		case !ok:
+			s.UsageError = "no ready DCGM exporter on this node"
+		case u.Err != nil:
+			s.UsageError = u.Err.Error()
+		default:
+			s.UsageKnown = true
+		}
 		for _, g := range groups {
-			used := ceilDiv(requested[s.Name][g.resource], g.replicas)
+			var devs []dcgm.Device
+			for _, d := range u.Devices {
+				if g.matches(d) {
+					devs = append(devs, d)
+				}
+			}
 			for i := range g.count {
+				used := s.UsageKnown && i < len(devs) && devs[i].Used
+				if used {
+					s.Used++
+				}
 				s.GPUs = append(s.GPUs, GPU{
 					Product:   g.product,
 					MemoryMiB: g.memoryMiB,
-					MIG:       g.mig,
-					Used:      s.Online && i < used,
+					MIG:       g.mig(),
+					Used:      used,
 				})
-			}
-			if s.Online {
-				s.Used += min(used, g.count)
 			}
 			s.Total += g.count
 		}
@@ -140,10 +172,15 @@ func Build(nodes []kube.Node, pods []kube.Pod, now time.Time) Snapshot {
 		snap.Summary.Total += s.Total
 		if s.Online {
 			snap.Summary.ServersOnline++
+		}
+		switch {
+		case !s.Online:
+			snap.Summary.Offline += s.Total
+		case !s.UsageKnown:
+			snap.Summary.Unknown += s.Total
+		default:
 			snap.Summary.Used += s.Used
 			snap.Summary.Available += s.Total - s.Used
-		} else {
-			snap.Summary.Offline += s.Total
 		}
 		snap.Servers = append(snap.Servers, s)
 	}
@@ -176,11 +213,10 @@ func nodeGroups(n kube.Node) []group {
 	}
 	if count > 0 {
 		gs = append(gs, group{
-			resource:  res,
 			product:   l[labelProduct],
 			count:     count,
 			memoryMiB: atoi(l[labelMemory]),
-			replicas:  replicas,
+			migAll:    l[labelMIG] == "single",
 		})
 	}
 
@@ -204,47 +240,14 @@ func nodeGroups(n kube.Node) []group {
 				continue
 			}
 			gs = append(gs, group{
-				resource:  res,
-				product:   strings.TrimSpace(l[labelProduct] + " MIG " + p),
-				count:     count,
-				memoryMiB: atoi(l[res+".memory"]),
-				replicas:  1,
-				mig:       true,
+				product:    strings.TrimSpace(l[labelProduct] + " MIG " + p),
+				count:      count,
+				memoryMiB:  atoi(l[res+".memory"]),
+				migProfile: p,
 			})
 		}
 	}
 	return gs
-}
-
-// podRequests returns the NVIDIA resources a pod holds, the same way the
-// scheduler counts them: the larger of the sum over containers and the
-// largest init container.
-func podRequests(p kube.Pod) map[string]int {
-	sum := map[string]int{}
-	for _, c := range p.Spec.Containers {
-		for res, n := range containerRequests(c) {
-			sum[res] += n
-		}
-	}
-	for _, c := range p.Spec.InitContainers {
-		for res, n := range containerRequests(c) {
-			sum[res] = max(sum[res], n)
-		}
-	}
-	return sum
-}
-
-func containerRequests(c kube.Container) map[string]int {
-	out := map[string]int{}
-	// Extended resources may set only limits; requests then default to them.
-	for _, m := range []map[string]string{c.Resources.Limits, c.Resources.Requests} {
-		for res, q := range m {
-			if strings.HasPrefix(res, "nvidia.com/") {
-				out[res] = atoi(q)
-			}
-		}
-	}
-	return out
 }
 
 func atoi(s string) int {
@@ -253,8 +256,4 @@ func atoi(s string) int {
 		return 0
 	}
 	return n
-}
-
-func ceilDiv(a, b int) int {
-	return (a + b - 1) / b
 }

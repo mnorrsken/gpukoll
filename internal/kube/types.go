@@ -23,27 +23,22 @@ type Condition struct {
 	LastTransitionTime time.Time `json:"lastTransitionTime"`
 }
 
-// Pod holds the fields of a Kubernetes Pod that gpukoll reads.
-type Pod struct {
-	Metadata struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"metadata"`
-	Spec struct {
-		NodeName       string      `json:"nodeName"`
-		Containers     []Container `json:"containers"`
-		InitContainers []Container `json:"initContainers"`
-	} `json:"spec"`
-	Status struct {
-		Phase string `json:"phase"`
-	} `json:"status"`
-}
-
-// Container holds a container's resource requests and limits.
-type Container struct {
-	Name      string `json:"name"`
-	Resources struct {
-		Requests map[string]string `json:"requests"`
-		Limits   map[string]string `json:"limits"`
-	} `json:"resources"`
+// EndpointSlice holds the fields of a discovery.k8s.io/v1 EndpointSlice
+// that gpukoll reads.
+type EndpointSlice struct {
+	Endpoints []struct {
+		Addresses []string `json:"addresses"`
+		NodeName  string   `json:"nodeName"`
+		TargetRef *struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"targetRef"`
+		Conditions struct {
+			Ready *bool `json:"ready"`
+		} `json:"conditions"`
+	} `json:"endpoints"`
+	Ports []struct {
+		Name string `json:"name"`
+		Port int    `json:"port"`
+	} `json:"ports"`
 }

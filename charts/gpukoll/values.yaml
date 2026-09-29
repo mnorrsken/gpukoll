@@ -16,8 +16,8 @@ serviceAccount:
   # Generated from the fullname when empty.
   name: ""
 
-# Cluster-wide read access to nodes and pods. gpukoll needs it to read the
-# GPU Feature Discovery node labels and the GPU requests of running pods.
+# A ClusterRole to list nodes (GPU Feature Discovery labels, Ready state)
+# and a Role in dcgm.namespace to list the DCGM exporter's EndpointSlices.
 rbac:
   create: true
 
@@ -77,5 +77,14 @@ tolerations: []
 affinity: {}
 
 config:
-  # How often to list nodes and pods from the API server.
+  # How often to list nodes and scrape the DCGM exporters.
   interval: 10s
+
+# NVIDIA DCGM exporter, deployed by the GPU Operator. It must run with
+# DCGM_EXPORTER_KUBERNETES=true (the GPU Operator default) so GPUs in use
+# carry a pod label. gpukoll connects to the exporter pods on their pod IPs;
+# a NetworkPolicy in this namespace must allow that.
+dcgm:
+  # nvidia-gpu-operator on OpenShift, gpu-operator for the upstream chart.
+  namespace: nvidia-gpu-operator
+  service: nvidia-dcgm-exporter

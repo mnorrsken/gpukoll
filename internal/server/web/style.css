@@ -154,6 +154,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .free { background: var(--free); }
 .used { background: var(--used) repeating-linear-gradient(135deg, var(--hatch) 0 3px, transparent 3px 7px); }
 .off { background: var(--off); }
+.unknown { background: transparent; border: 1.5px dashed var(--text-3); }
+.legend span[hidden] { display: none; }
 
 .usage {
   display: flex;
@@ -165,6 +167,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   background: var(--surface-2);
 }
 .usage > div { height: 100%; transition: flex-grow 0.4s ease; }
+.usage > .unknown { border: 0; background: repeating-linear-gradient(90deg, var(--text-3) 0 4px, transparent 4px 7px); opacity: 0.6; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 20px; color: var(--text-2); font-size: 13px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -210,6 +213,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
 .server-count { margin-top: 12px; color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .server-count b { color: var(--text); font-weight: 650; }
+.server-error { margin-top: 2px; color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .blocks {
   display: flex;
@@ -233,6 +237,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 }
 .gpu.used { background: var(--used) repeating-linear-gradient(135deg, var(--hatch) 0 3px, transparent 3px 7px); }
 .gpu.off { background: var(--off); color: var(--text-2); }
+.gpu.unknown { background: transparent; border: 1.5px dashed var(--text-3); color: var(--text-3); }
 .gpu.mig { border-radius: 3px; }
 .gpu:hover { transform: translateY(-2px); }
 .gpu span { text-align: center; }

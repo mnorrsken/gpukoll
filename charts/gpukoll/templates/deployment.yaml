@@ -35,6 +35,8 @@ spec:
           args:
             - -listen=:8080
             - -interval={{ .Values.config.interval }}
+            - -dcgm-namespace={{ .Values.dcgm.namespace }}
+            - -dcgm-service={{ .Values.dcgm.service }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
