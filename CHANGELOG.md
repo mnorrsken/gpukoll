@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.2.0
+
+### Changed
+- **GPU usage from DCGM** — usage now comes from the NVIDIA DCGM exporter instead of pod resource requests. A GPU is in use when its metrics carry a `pod` label. This needs `DCGM_EXPORTER_KUBERNETES=true`, which is the GPU Operator default. The UI marks the exact GPUs in use instead of the first N.
+- **Smaller RBAC** — the ClusterRole now only has `list` on nodes (no pods, no `get`). A new Role in the DCGM exporter namespace allows `list` on `endpointslices` (`discovery.k8s.io`). gpukoll can no longer read pod specs.
+
+### Added
+- **DCGM settings** — chart values `dcgm.namespace` (default `nvidia-gpu-operator`, use `gpu-operator` for the upstream chart) and `dcgm.service` (default `nvidia-dcgm-exporter`), and flags `-dcgm-namespace` and `-dcgm-service`.
+- **Usage unknown state** — when a server is up but its exporter cannot be scraped, its blocks are dashed and the reason is shown. Those GPUs count as unknown (not available, not in use).
+- **MIG single strategy** — MIG instances are now mapped to blocks for the "single" strategy too (mixed was already supported).
+- **Local dev proxy** — `-dcgm-proxy` flag scrapes through the API server pod proxy. `make run` uses it.
+
+### Notes
+- On upgrade, set `dcgm.namespace` if the GPU Operator is not in `nvidia-gpu-operator`.
+- A NetworkPolicy in that namespace must allow ingress from gpukoll on TCP 9400.
+
 ## v0.1.0
 
 ### Added
