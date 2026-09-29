@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.2.1
+
+### Fixed
+- **In-use GPUs shown as available** — the GPU Operator labels every GPU node `nvidia.com/mig.strategy=single`, even without MIG, and gpukoll then only looked for MIG instances. gpukoll now uses whole GPUs when the DCGM exporter reports any and falls back to MIG instances only when there are none.
+
 ## v0.2.0
 
 ### Changed
