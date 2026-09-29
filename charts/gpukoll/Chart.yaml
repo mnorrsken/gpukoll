@@ -1,0 +1,18 @@
+apiVersion: v2
+name: gpukoll
+description: Web UI showing GPU servers and GPU usage in a cluster running the NVIDIA GPU Operator
+type: application
+# Set from the git tag by CI; do not bump by hand.
+version: 0.0.0
+appVersion: "0.0.0"
+keywords:
+  - gpu
+  - nvidia
+  - gpu-operator
+  - dashboard
+  - openshift
+home: https://github.com/mnorrsken/gpukoll
+sources:
+  - https://github.com/mnorrsken/gpukoll
+maintainers:
+  - name: mnorrsken

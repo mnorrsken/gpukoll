@@ -1,0 +1,27 @@
+{{- if and .Values.route.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "gpukoll.fullname" . }}
+  labels:
+    {{- include "gpukoll.labels" . | nindent 4 }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "gpukoll.fullname" . }}
+    weight: 100
+  port:
+    targetPort: http
+  {{- with .Values.route.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

@@ -1,0 +1,81 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/mnorrsken/gpukoll
+  pullPolicy: IfNotPresent
+  # Defaults to the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  # Generated from the fullname when empty.
+  name: ""
+
+# Cluster-wide read access to nodes and pods. gpukoll needs it to read the
+# GPU Feature Discovery node labels and the GPU requests of running pods.
+rbac:
+  create: true
+
+podAnnotations: {}
+podLabels: {}
+
+# No runAsUser/fsGroup, so OpenShift's restricted-v2 SCC can pick the UID.
+# The image runs as UID 65532 when nothing assigns one.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: gpukoll.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: gpukoll-tls
+  #    hosts:
+  #      - gpukoll.example.com
+
+# OpenShift Route. Only rendered when the cluster serves route.openshift.io/v1.
+route:
+  enabled: true
+  # Empty lets OpenShift generate <name>-<namespace>.<apps domain>.
+  host: ""
+  annotations: {}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+config:
+  # How often to list nodes and pods from the API server.
+  interval: 10s

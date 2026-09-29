@@ -1,0 +1,17 @@
+gpukoll is running. Access is anonymous and read-only.
+{{- if and .Values.route.enabled (.Capabilities.APIVersions.Has "route.openshift.io/v1/Route") }}
+
+OpenShift Route:
+  oc get route {{ include "gpukoll.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.host}'
+{{- else if .Values.ingress.enabled }}
+
+Ingress:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+
+Port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gpukoll.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://127.0.0.1:8080
+{{- end }}
