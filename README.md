@@ -10,6 +10,8 @@ are in use, and which servers are online.
   (striped) is in use, grey means the server is offline, dashed means the
   server is up but its DCGM exporter could not be read. Block area follows
   GPU memory.
+- Servers with different GPU kinds list each kind. Cordoned servers get a
+  "Cordoned" pill.
 - No login. Every visitor is an anonymous, read-only guest.
 - Light and dark mode (follows the OS, or pick one with the button top right).
 
@@ -23,14 +25,24 @@ the number of viewers.
 |------|---------------------|
 | GPU servers | nodes labelled `nvidia.com/gpu.present=true` or with `nvidia.com/gpu` capacity |
 | GPU count | node capacity `nvidia.com/gpu`, falling back to label `nvidia.com/gpu.count` |
-| Model, memory, driver | GPU Feature Discovery labels `nvidia.com/gpu.product`, `nvidia.com/gpu.memory`, `nvidia.com/cuda.driver-version.full` |
+| Model, memory (whole GPUs) | DCGM exporter: `modelName` label, and memory as the sum of `DCGM_FI_DEV_FB_FREE`, `FB_USED` and `FB_RESERVED`. Falls back to the GFD labels below when the exporter has no data for a GPU |
+| Model, memory (MIG devices), driver | GPU Feature Discovery labels `nvidia.com/gpu.product`, `nvidia.com/gpu.memory`, `nvidia.com/cuda.driver-version.full` |
 | GPUs in use | DCGM exporter metrics: a GPU whose series has a `pod` label is allocated to a pod |
 | Online | node `Ready` condition is `True` |
+| Cordoned | node `spec.unschedulable` is `true` (`kubectl cordon`) |
 
 The exporter must run with `DCGM_EXPORTER_KUBERNETES=true`, which the GPU
 Operator sets by default. gpukoll finds the exporter pods through the
 EndpointSlices of the `nvidia-dcgm-exporter` Service and connects to them on
 their pod IPs, port 9400.
+
+GFD labels describe only one GPU kind per node, so a node with, say, H100
+and L4 cards needs the exporter for correct models and memory. `FB_FREE` and
+`FB_USED` are in the exporter's default counters; `FB_RESERVED` only in newer
+ones. Without it, memory reads slightly low.
+
+A cordoned server is still counted as online, and its free GPUs still count
+as available in the summary. The JSON API has a `cordoned` boolean per server.
 
 MIG shows one block per MIG device, for both the `single` and the `mixed`
 strategy. With time-slicing (`nvidia.com/gpu.replicas`), a GPU counts as in

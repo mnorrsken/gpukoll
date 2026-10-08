@@ -2,6 +2,7 @@ package gpu
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -168,6 +169,29 @@ func TestBuild(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildMixedGPUs(t *testing.T) {
+	labels := map[string]string{labelCount: "3", labelMemory: "81559", labelProduct: "NVIDIA-H100-80GB-HBM3"}
+	n := node(t, "gpu1", "True", labels, map[string]string{resGPU: "3"})
+	n.Spec.Unschedulable = true
+	u := Usage{Devices: []dcgm.Device{
+		{GPU: 0, Instance: -1, Model: "NVIDIA H100 80GB HBM3", MemoryMiB: 81559},
+		{GPU: 1, Instance: -1, Model: "NVIDIA L4", MemoryMiB: 23034, Used: true},
+		{GPU: 2, Instance: -1},
+	}}
+	s := Build([]kube.Node{n}, map[string]Usage{"gpu1": u}, time.Unix(0, 0)).Servers[0]
+	want := []GPU{
+		{Product: "NVIDIA H100 80GB HBM3", MemoryMiB: 81559},
+		{Product: "NVIDIA L4", MemoryMiB: 23034, Used: true},
+		{Product: "NVIDIA-H100-80GB-HBM3", MemoryMiB: 81559}, // labels when the exporter has no details
+	}
+	if !reflect.DeepEqual(s.GPUs, want) {
+		t.Errorf("GPUs = %+v, want %+v", s.GPUs, want)
+	}
+	if !s.Cordoned {
+		t.Error("Cordoned = false, want true")
 	}
 }
 

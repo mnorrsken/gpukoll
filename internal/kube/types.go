@@ -8,6 +8,10 @@ type Node struct {
 		Name   string            `json:"name"`
 		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
+	Spec struct {
+		// Unschedulable is set by `kubectl cordon`.
+		Unschedulable bool `json:"unschedulable"`
+	} `json:"spec"`
 	Status struct {
 		Capacity   map[string]string `json:"capacity"`
 		Conditions []Condition       `json:"conditions"`

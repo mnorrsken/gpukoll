@@ -117,9 +117,18 @@ function serverMeta(s) {
   const parts = [];
   const full = s.gpus.filter((g) => !g.mig);
   const mig = s.gpus.length - full.length;
-  if (full.length) {
-    let p = `${full.length}× ${prettyProduct(s.product) || "GPU"}`;
-    if (full[0].memoryMiB) p += ` · ${gb(full[0].memoryMiB)} GB`;
+  // One entry per kind of GPU, in GPU order: a node can mix models and sizes.
+  const kinds = new Map();
+  for (const g of full) {
+    const name = prettyProduct(g.product) || "GPU";
+    const key = name + "|" + (g.memoryMiB || 0);
+    const k = kinds.get(key) || { name, memoryMiB: g.memoryMiB, n: 0 };
+    k.n++;
+    kinds.set(key, k);
+  }
+  for (const k of kinds.values()) {
+    let p = `${k.n}× ${k.name}`;
+    if (k.memoryMiB) p += ` · ${gb(k.memoryMiB)} GB`;
     parts.push(p);
   }
   if (mig) parts.push(`${mig} MIG devices`);
@@ -129,9 +138,10 @@ function serverMeta(s) {
 
 function renderServer(s, maxMiB) {
   const since = s.since ? ` for ${ago(new Date(s.since))}` : "";
-  const pill = s.online
+  let pill = s.online
     ? `<span class="pill on"><i></i>Online</span>`
     : `<span class="pill down" title="${esc(s.status + since)}"><i></i>Offline</span>`;
+  if (s.cordoned) pill += `<span class="pill cordoned" title="Unschedulable: no new pods start on this server"><i></i>Cordoned</span>`;
   let count;
   if (!s.online) count = `${s.total} GPUs unavailable · ${esc(s.status)}${esc(since)}`;
   else if (!s.usageKnown)
@@ -144,7 +154,7 @@ function renderServer(s, maxMiB) {
         <h2 class="server-name">${esc(s.name)}</h2>
         <div class="server-meta">${esc(serverMeta(s))}</div>
       </div>
-      ${pill}
+      <div class="pills">${pill}</div>
     </div>
     <div class="server-count">${count}</div>
     <div class="blocks">${blocks}</div>

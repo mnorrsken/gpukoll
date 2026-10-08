@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## Unreleased
+
+### Added
+- **Mixed GPU kinds on one node** — GPU Feature Discovery labels describe only one GPU kind per node, so gpukoll now reads each whole GPU's model (`modelName` label) and memory (`DCGM_FI_DEV_FB_FREE` + `FB_USED` + `FB_RESERVED`) from the DCGM exporter. Labels are the fallback when the exporter has no data for a GPU. MIG devices still use labels. The server line lists each kind, e.g. "2× NVIDIA H100 80GB HBM3 · 80 GB · 2× NVIDIA L4 · 22 GB". `FB_RESERVED` is not in the exporter's default counters in older versions; without it, memory reads slightly low.
+- **Cordoned nodes** — a node with `spec.unschedulable: true` (`kubectl cordon`) shows a "Cordoned" pill next to Online/Offline. The JSON API has a new `cordoned` boolean per server. Summary counts do not change: free GPUs on a cordoned server still count as available. No new RBAC.
+
 ## v0.3.0
 
 ### Added

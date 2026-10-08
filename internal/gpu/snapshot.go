@@ -1,9 +1,11 @@
 // Package gpu turns Kubernetes nodes and pods into a GPU inventory.
 //
 // GPU details come from the labels that NVIDIA GPU Feature Discovery (part of
-// the GPU Operator) puts on each node. Usage comes from the node's DCGM
-// exporter: a GPU is in use when it is allocated to a pod. A node is online
-// when its Ready condition is True.
+// the GPU Operator) puts on each node. Those describe one kind of GPU per
+// node, so the model and memory the DCGM exporter reports for each GPU take
+// precedence. Usage comes from the node's DCGM exporter: a GPU is in use
+// when it is allocated to a pod. A node is online when its Ready condition
+// is True, and cordoned when it is marked unschedulable.
 package gpu
 
 import (
@@ -52,14 +54,15 @@ type Summary struct {
 
 // Server is one GPU node.
 type Server struct {
-	Name    string    `json:"name"`
-	Online  bool      `json:"online"`
-	Status  string    `json:"status"`
-	Since   time.Time `json:"since,omitzero"`
-	Product string    `json:"product,omitempty"`
-	Driver  string    `json:"driver,omitempty"`
-	Total   int       `json:"total"`
-	Used    int       `json:"used"`
+	Name     string    `json:"name"`
+	Online   bool      `json:"online"`
+	Cordoned bool      `json:"cordoned"`
+	Status   string    `json:"status"`
+	Since    time.Time `json:"since,omitzero"`
+	Product  string    `json:"product,omitempty"`
+	Driver   string    `json:"driver,omitempty"`
+	Total    int       `json:"total"`
+	Used     int       `json:"used"`
 	// UsageKnown is false when the node's DCGM exporter could not be read;
 	// UsageError then says why.
 	UsageKnown bool   `json:"usageKnown"`
@@ -132,11 +135,12 @@ func Build(nodes []kube.Node, usage map[string]Usage, now time.Time) Snapshot {
 			continue
 		}
 		s := Server{
-			Name:    n.Metadata.Name,
-			Status:  "Unknown",
-			Product: n.Metadata.Labels[labelProduct],
-			Driver:  n.Metadata.Labels[labelDriver],
-			GPUs:    []GPU{},
+			Name:     n.Metadata.Name,
+			Cordoned: n.Spec.Unschedulable,
+			Status:   "Unknown",
+			Product:  n.Metadata.Labels[labelProduct],
+			Driver:   n.Metadata.Labels[labelDriver],
+			GPUs:     []GPU{},
 		}
 		for _, c := range n.Status.Conditions {
 			if c.Type == "Ready" {
@@ -169,12 +173,23 @@ func Build(nodes []kube.Node, usage map[string]Usage, now time.Time) Snapshot {
 				if used {
 					s.Used++
 				}
-				s.GPUs = append(s.GPUs, GPU{
+				gp := GPU{
 					Product:   g.product,
 					MemoryMiB: g.memoryMiB,
 					MIG:       g.mig(),
 					Used:      used,
-				})
+				}
+				// The exporter's model and memory hold even when usage is
+				// not trusted, as for a node that just went NotReady.
+				if i < len(devs) && !devs[i].MIG() {
+					if devs[i].Model != "" {
+						gp.Product = devs[i].Model
+					}
+					if devs[i].MemoryMiB > 0 {
+						gp.MemoryMiB = devs[i].MemoryMiB
+					}
+				}
+				s.GPUs = append(s.GPUs, gp)
 			}
 			s.Total += g.count
 		}

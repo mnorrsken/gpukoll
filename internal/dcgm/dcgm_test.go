@@ -23,8 +23,22 @@ DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-b",device="nvidia1",Hostname="n1"} 0
 go_goroutines 12
 `,
 			want: []Device{
-				{GPU: 0, Instance: -1, Used: true},
-				{GPU: 1, Instance: -1},
+				{GPU: 0, Instance: -1, Used: true, Model: "NVIDIA H100 80GB HBM3", MemoryMiB: 40000},
+				{GPU: 1, Instance: -1, Model: "NVIDIA H100 80GB HBM3"},
+			},
+		},
+		{
+			name: "different gpus on one node",
+			input: `DCGM_FI_DEV_FB_FREE{gpu="0",UUID="GPU-a",modelName="NVIDIA H100 80GB HBM3",Hostname="n1"} 81000
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-a",modelName="NVIDIA H100 80GB HBM3",Hostname="n1"} 0
+DCGM_FI_DEV_FB_RESERVED{gpu="0",UUID="GPU-a",modelName="NVIDIA H100 80GB HBM3",Hostname="n1"} 559
+DCGM_FI_DEV_FB_FREE{gpu="1",UUID="GPU-b",modelName="NVIDIA L4",Hostname="n1",pod="p",namespace="ns"} 20000 1700000000000
+DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-b",modelName="NVIDIA L4",Hostname="n1",pod="p",namespace="ns"} 2000 1700000000000
+DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-b",modelName="NVIDIA L4",Hostname="n1",pod="q",namespace="ns"} 2000
+`,
+			want: []Device{
+				{GPU: 0, Instance: -1, Model: "NVIDIA H100 80GB HBM3", MemoryMiB: 81559},
+				{GPU: 1, Instance: -1, Used: true, Model: "NVIDIA L4", MemoryMiB: 22000},
 			},
 		},
 		{
@@ -43,7 +57,7 @@ DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-b",Hostname="n1"} 0
 		{
 			name:  "escaped label values",
 			input: `DCGM_FI_DEV_FB_USED{gpu="0",modelName="a \"quoted\", name\\",pod="x"} 1` + "\n",
-			want:  []Device{{GPU: 0, Instance: -1, Used: true}},
+			want:  []Device{{GPU: 0, Instance: -1, Used: true, Model: `a "quoted", name\`, MemoryMiB: 1}},
 		},
 		{
 			name:  "no dcgm series",
