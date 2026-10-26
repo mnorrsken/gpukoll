@@ -5,7 +5,7 @@ LDFLAGS := -s -w -X $(PKG)/internal/version.Version=$(VERSION) -X $(PKG)/interna
 IMAGE   ?= ghcr.io/mnorrsken/gpukoll
 CHART   := charts/gpukoll
 
-.PHONY: build run test race vet fmt clean docker-build helm-lint
+.PHONY: build run test race vet vuln fmt clean docker-build helm-lint
 
 build:
 	go build -ldflags '$(LDFLAGS)' -o bin/gpukoll ./cmd/gpukoll
@@ -22,6 +22,9 @@ race:
 
 vet:
 	go vet ./...
+
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 fmt:
 	gofmt -l -w .
