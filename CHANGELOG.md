@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.4.1
+
+### Changed
+- **Dependencies** — builder image Go 1.27.1 → 1.27.3, newer `distroless/static:nonroot` base image, `docker/login-action` v4.6.0 → v4.7.0, govulncheck v1.8.0 → v1.9.0.
+
 ## v0.4.0
 
 ### Added
