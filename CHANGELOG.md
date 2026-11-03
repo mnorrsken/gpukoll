@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.4.2
+
+### Changed
+- **Dependencies** — newer `golang` builder image and `distroless/static:nonroot` base image digests.
+
 ## v0.4.1
 
 ### Changed
