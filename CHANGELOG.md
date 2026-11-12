@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. Versions follow `vMAJOR.MINOR.PATCH`.
 
+## v0.4.3
+
+### Changed
+- **Dependencies** — newer `golang` builder image digest, `docker/login-action` v4.7.0 → v4.8.0.
+
 ## v0.4.2
 
 ### Changed
